@@ -1,3 +1,2 @@
-# maven-project
-
-Simple Maven Project
+# DevOps pipeline 
+using docker git and jenkins
