@@ -1,3 +1,3 @@
-<h1> Hello, Welcome to Valaxy Technologies !!! </h1>
-<h2> Deploying on Kubernetes </h2>
-<h3> One last test </h3>
+<h1> Cloud COmputing Demo </h1>
+<h2> Road Accident Prediction</h2>
+<h3> </h3>
