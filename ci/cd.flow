@@ -1,0 +1,52 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" version="24.7.17">
+  <diagram name="Page-1" id="sf4EVKFeG47G7umWI0Cg">
+    <mxGraphModel dx="1234" dy="446" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="zNM-pZASkHDeRUY2njpE-1" value="git checkout&amp;nbsp;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="70" y="40" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-2" value="sonarqube scans" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="470" y="40" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-3" value="" style="endArrow=classic;html=1;rounded=0;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="160" y="90" as="sourcePoint" />
+            <mxPoint x="260" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-4" value="Label" style="edgeLabel;resizable=0;html=1;;align=center;verticalAlign=middle;" parent="zNM-pZASkHDeRUY2njpE-3" connectable="0" vertex="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-5" value="build using maven" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="230" y="50" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-6" value="" style="endArrow=classic;html=1;rounded=0;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="370" y="89.5" as="sourcePoint" />
+            <mxPoint x="470" y="89.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-7" value="Label" style="edgeLabel;resizable=0;html=1;;align=center;verticalAlign=middle;" parent="zNM-pZASkHDeRUY2njpE-6" connectable="0" vertex="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-8" value="push the artifact to artifactory" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="590" y="110" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-9" value="creating a docker image" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="600" y="210" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-10" value="scanning the docker image" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="610" y="350" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-11" value="pushing the docker image to repository" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="440" y="380" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="zNM-pZASkHDeRUY2njpE-12" value="depliying that to kubernetes cluster&amp;nbsp;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
+          <mxGeometry x="270" y="380" width="80" height="80" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
