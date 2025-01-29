@@ -1,0 +1,432 @@
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - project: "spectrumflow/sf-gitlab-ci-templates"
+    file: "/templates/veracode.gitlab-ci.yml"
+    ref: "veracode/5.5.22"
+  - project: "spectrumflow/sf-gitlab-ci-templates"
+    file: "/templates/sonarqube.gitlab-ci.yml"
+    ref: "sonarqube/1.0.10"
+    
+
+variables:
+  SPECFLOW_REPO: "docker-artifactory.spectrumflow.net"
+  DOCKER_IMAGE_REPO: "${SPECFLOW_REPO}/docker"
+  IMAGE_NAME: "${DOCKER_IMAGE_REPO}/${CI_PROJECT_PATH}/${CI_PROJECT_NAME}"
+  GIT_STRATEGY: clone
+  VERACODE_APP_NAME: "${CI_PROJECT_NAME}"
+  VERACODE_TYPE: "PYTHON_3.8.17_FLASK_2.2.2_PIP_ZIP"
+  VERACODE_SCAN: "true" 
+  VERACODE_MANUAL_TRIGGER: "false"
+  SONARQUBE_SCAN: "true" 
+  SONARQUBE_SOURCE: "/builds/senoe/cost-optimization-services/${CI_PROJECT_NAME}/"
+  SONARQUBE_URL: ${SONAR_HOST_URL}
+  SONARQUBE_LOGIN_KEY: ${SONAR_TOKEN}
+  SONARQUBE_PROJECT_KEY: ${CI_PROJECT_NAME}
+  GIT_DEPTH: "0"
+
+before_script:
+  - PROJECT_NAME=$(echo ${CI_PROJECT_NAME} | sed 's/^costopt-services-//')
+  - PROJECT_NAME_UPPERCASE=$(echo ${PROJECT_NAME} | tr '[:lower:]' '[:upper:]')
+
+default:
+  tags:
+    - docker
+
+stages:
+  - unittest
+  - build
+  - scan
+  - deploy
+  - verify
+  - test
+
+unittest-code-job:
+  stage: unittest
+  allow_failure: true
+  image: docker-artifactory.spectrumflow.net/docker/python:latest
+  script:
+    - |
+      echo "install virtual environment"
+      pip3 install virtualenv
+      virtualenv venv
+      source venv/bin/activate
+      pip3 install -r requirements.txt -i \
+        https://${ARTIFACTORY_EMAIL}:${ARTIFACTORY_API_KEY}@docker-artifactory.spectrumflow.net/artifactory/api/pypi/pypi/simple
+      pip3 install coverage
+      pip3 install pytest-cov
+      ls
+      echo "run unit tests"
+      python -m pytest \
+        --cov=api \
+        --cov=backend_adapters \
+        --cov=controllers \
+        --cov=services \
+        --cov=utils \
+        --cov=crosswalk_utils \
+        --cov-report html:coverage-reports/coverage-pytest.hml \
+        --cov-report json:coverage-reports/coverage-pytest.json \
+        --cov-report xml:coverage-reports/coverage-pytest.xml
+  artifacts:
+    paths:
+      - coverage-reports/coverage-pytest.json
+      - coverage-reports/coverage-pytest.xml
+      - coverage-reports/coverage-pytest.hml
+    expire_in: 10 days
+
+
+build-feature:
+  stage: build
+  image: ${DOCKER_IMAGE_REPO}/docker:latest
+  script:
+    - echo "Building Docker images for ${CI_PROJECT_NAME}"
+    - echo "DOCKER_IMAGE_REPO -> ${DOCKER_IMAGE_REPO}"
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - echo "CI_COMMIT_BRANCH -> ${CI_COMMIT_BRANCH}"
+    - |
+      if [[ "${CI_COMMIT_MESSAGE}" == *"dev1"* ]]
+      then
+        echo "Deploying to dev1 namespace"
+        export K8_NAMESPACE="dev1"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev2"* ]]
+      then
+        echo "Deploying to dev2 namespace"
+        export K8_NAMESPACE="dev2"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev3"* ]]
+      then
+        echo "Deploying to dev3 namespace"
+        export K8_NAMESPACE="dev3"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev4"* ]]
+      then
+        echo "Deploying to dev4 namespace"
+        export K8_NAMESPACE="dev4"
+      else
+        echo "Pipeline stopped,deployment environment not specified"
+        exit 125
+      fi
+    - echo $K8_NAMESPACE >> deploy_env.txt
+    - echo "${ARTIFACTORY_API_KEY}" | docker login -u ${ARTIFACTORY_EMAIL} --password-stdin ${SPECFLOW_REPO}
+    - export RELEASE_NAME="${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - docker builder prune -a -f
+    - echo "IMAGE_NAME - ${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - echo "docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} ."
+    - docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} .
+    - echo "docker push ${RELEASE_NAME}"
+    - docker push ${RELEASE_NAME}
+    - echo "Success ! - Docker Image uploaded to Artifactory"
+  artifacts:
+    paths:
+      - deploy_env.txt
+    expire_in: 30 mins
+  except:
+    - main
+    - release
+    - develop
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+build-dev-qa:
+  stage: build
+  image: ${DOCKER_IMAGE_REPO}/docker:latest
+  script:
+    - echo "Building Docker images for ${CI_PROJECT_NAME}"
+    - echo "DOCKER_IMAGE_REPO -> ${DOCKER_IMAGE_REPO}"
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - echo "CI_COMMIT_BRANCH -> ${CI_COMMIT_BRANCH}"
+    - export K8_NAMESPACE="qa"
+    - echo "Deploying to qa namespace"
+    - echo $K8_NAMESPACE >> deploy_env.txt
+    - echo "${ARTIFACTORY_API_KEY}" | docker login -u ${ARTIFACTORY_EMAIL} --password-stdin ${SPECFLOW_REPO}
+    - export RELEASE_NAME="${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - docker builder prune -a -f
+    - echo "IMAGE_NAME - ${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - echo "docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${RELEASE_NAME} ."
+    - docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${RELEASE_NAME} .
+    - echo "docker push ${RELEASE_NAME}"
+    - docker push ${RELEASE_NAME}
+    - echo "Success ! - Docker Image uploaded to Artifactory"
+  artifacts:
+    paths:
+      - deploy_env.txt
+    expire_in: 30 mins
+  only:
+    - develop
+
+build-prod:
+  stage: build
+  image: ${DOCKER_IMAGE_REPO}/docker:latest
+  script:
+    - echo "Building Docker images for ${CI_PROJECT_NAME}"
+    - |
+      if [[ "$CI_COMMIT_TAG" =~ ^${PROJECT_NAME_UPPERCASE}_[0-9]+\.[0-9]+\.[0-9]+$ ]]
+      then
+        echo "CI_COMMIT_TAG -> ${CI_COMMIT_TAG}"
+      else
+        echo "Pipeline stopped, invalid CI_COMMIT_TAG given as ${CI_COMMIT_TAG}"
+        exit 125
+      fi
+    - echo "DOCKER_IMAGE_REPO -> ${DOCKER_IMAGE_REPO}"
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - echo "CI_COMMIT_BRANCH -> ${CI_COMMIT_BRANCH}"
+    - export K8_NAMESPACE="prod"
+    - echo "Deploying to prod namespace"
+    - echo $K8_NAMESPACE >> deploy_env.txt
+    - echo "${ARTIFACTORY_API_KEY}" | docker login -u ${ARTIFACTORY_EMAIL} --password-stdin ${SPECFLOW_REPO}
+    - export RELEASE_NAME="${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - docker builder prune -a -f
+    - echo "IMAGE_NAME - ${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA}"
+    - echo "docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${RELEASE_NAME} ."
+    - docker build --build-arg ARTIFACTORY_EMAIL=${ARTIFACTORY_EMAIL} --build-arg ARTIFACTORY_API_KEY=${ARTIFACTORY_API_KEY} -t ${RELEASE_NAME} .
+    - echo "docker push ${RELEASE_NAME}"
+    - docker push ${RELEASE_NAME}
+    - echo "Success ! - Docker Image uploaded to Artifactory"
+  artifacts:
+    paths:
+      - deploy_env.txt
+    expire_in: 30 mins
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_TAG'
+  tags:
+    - costopt
+
+deploy:
+  stage: deploy
+  script:
+    - echo "${whoami}"
+    - whoami
+    - export K8_NAMESPACE=$(sed -n '1p' deploy_env.txt)
+    - echo "Project Name -> ${PROJECT_NAME}"
+    - echo "Build namespace -> $K8_NAMESPACE"
+    - export KUBECONFIG=$HOME/.kube/config.yml
+    - echo "kube config path -> $KUBECONFIG"
+    - echo "DEV_PROXY=${DEV_PROXY}"
+    - chmod 600 ~/.kube/config.yml
+    - echo "DEV_NO_PROXY=${DEV_NO_PROXY}"
+    - echo "helm upgrade --install ${CI_PROJECT_NAME} helm/ -f helm/values.yaml -f .deploy/feature.yml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set image.name=${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} --set configs.RELEASE_ID=${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHORT_SHA} --set configs.BASE_URL='http://${K8_DEV_TEST_HOST}' --namespace ${K8_NAMESPACE}"
+    - helm upgrade --install ${CI_PROJECT_NAME} helm/ -f helm/values.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set image.name=${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} --set configs.RELEASE_ID=${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHORT_SHA} --set configs.BASE_URL='https://${K8_DEV_TEST_HOST}' --set ingress.hostname='senoe-apps.dev.chtrse.com' --set ingress.tls='senoe-ingress-tls-secret' --namespace ${K8_NAMESPACE} --set limits.cpu=${CPU_LIMIT_DEV} --set requests.cpu=${CPU_REQUEST_DEV} --set limits.memory=${MEMORY_LIMIT_DEV} --set requests.memory=${MEMORY_REQUESTS_DEV}
+    - echo "feature-${CI_COMMIT_REF_NAME} is deployed to https://${K8_DEV_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/swagger-ui/ deployed"
+     
+  environment:
+    name: dev
+    url: https://${K8_DEV_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/swagger-ui/
+    
+  tags:
+    - senoe-coupa-dev
+  except:
+    - main
+    - release
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+deploy-prod:
+  stage: deploy
+  script:
+    - echo "${whoami}"
+    - whoami
+    - export K8_NAMESPACE="prod"
+    - echo "Build namespace -> $K8_NAMESPACE"
+    - export KUBECONFIG=$HOME/.kube/config.yml
+    - echo "kube config path -> $KUBECONFIG"
+    - echo "DEV_PROXY=${DEV_PROXY}"
+    - chmod 600 ~/.kube/config.yml
+    - echo "DEV_NO_PROXY=${DEV_NO_PROXY}"
+    - |
+      echo "helm upgrade --install ${CI_PROJECT_NAME} helm/ \
+      -f helm/values.yaml \
+      --set configs.ENVIRONMENT=${K8_NAMESPACE} \
+      --set image.name=${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} \
+      --set configs.RELEASE_ID=${CI_COMMIT_TAG}-${CI_COMMIT_SHORT_SHA} \
+      --set configs.BASE_URL='https://${K8_PROD_TEST_HOST}' --namespace ${K8_NAMESPACE}"
+    - |
+      helm upgrade --install ${CI_PROJECT_NAME} helm/ -f helm/values.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set image.name=${IMAGE_NAME}:${K8_NAMESPACE}-${CI_COMMIT_SHORT_SHA} --set configs.RELEASE_ID=${CI_COMMIT_TAG}-${CI_COMMIT_SHORT_SHA} --set configs.BASE_URL="https://${K8_PROD_TEST_HOST}" --set ingress.hostname='costopt.chtrse.com' --set ingress.tls='costopt-tls-secret' --namespace ${K8_NAMESPACE} --set autoscaling.minReplicas=${PROD_REPLICAS} --set autoscaling.maxReplicas=${PROD_REPLICAS} --set limits.cpu=${CPU_LIMIT_PROD} --set requests.cpu=${CPU_REQUESTS_PROD} --set limits.memory=${MEMORY_LIMIT_PROD} --set requests.memory=${MEMORY_REQUESTS_PROD}
+      echo "feature-${CI_COMMIT_REF_NAME} is deployed to https://${K8_PROD_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/swagger-ui/ deployed"
+  when: manual
+  environment:
+    name: prod
+    url: http://${K8_PROD_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/swagger-ui/
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_TAG'
+  tags:
+    - costopt
+
+
+  
+verify_app_is_alive:
+  stage: verify
+  tags:
+    - senoe-coupa-dev 
+  when: delayed
+  start_in: 15 seconds
+  script:
+    - export K8_NAMESPACE=$(sed -n '1p' deploy_env.txt)
+    - echo "Test Environment -> ${K8_NAMESPACE}"
+    - test_url="https://${K8_DEV_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/isAlive"
+    - echo "Test url -> $test_url"
+    - echo "status_code=$(curl -v --write-out %{http_code} --silent --output /dev/null $test_url)"
+    - status_code=$(curl -k --write-out %{http_code} --silent --output /dev/null $test_url)
+    - |
+      if [[ "$status_code" -ne 200 ]] ; then
+        echo "Site is not Available health check status code - $status_code"
+        exit 125
+      else
+        echo "Deployment successful"
+        echo "response -> $(curl $test_url)"
+        exit 0
+      fi   
+  except:
+    - main
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+verify_app_is_alive_prod:
+  stage: verify
+  tags:
+    - costopt
+  script:
+    - export K8_NAMESPACE="prod"
+    - echo "Test Environment -> ${K8_NAMESPACE}"
+    - test_url="http://${K8_PROD_TEST_HOST}/${K8_NAMESPACE}/costopt/${PROJECT_NAME}/isAlive"
+    - echo "Test url -> $test_url"
+    - status_code=$(curl --write-out %{http_code} --silent --output /dev/null $test_url)
+    - echo "status code - ${status_code}"
+    - |
+      if [[ "$status_code" -ne 200 ]] ; then
+        echo "Site is not Available health check status code - $status_code"
+        exit 125
+      else
+        echo "Deployment successful"
+        echo "response -> $(curl $test_url)"
+        exit 0
+      fi
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_TAG'
+      when: delayed
+      start_in: 30 seconds
+  needs:
+    - ["deploy-prod"]
+
+
+rollback_feature:
+  stage: verify
+  tags:
+    - senoe-coupa-dev
+  script:
+    - echo "Rollback for ${CI_PROJECT_NAME}"
+    - export K8_NAMESPACE=$(sed -n '1p' deploy_env.txt)
+    - export DEPLOYMENT_DATA=$(helm ls --namespace ${K8_NAMESPACE})
+    - export REVISION=$(echo "$DEPLOYMENT_DATA" | awk -v name="${CI_PROJECT_NAME}" '$1 == name { print $3 }')
+    - |
+      if [[ $REVISION -gt 1 ]]; then
+        REVISED_REVISION=$((REVISION - 1))
+        echo "revised revision is $REVISED_REVISION"
+      else
+        echo "Insufficiant revisions available for ${CI_PROJECT_NAME} as $REVISION"
+        echo "Rollback Unsuccessful"
+        exit 125
+      fi
+    - helm rollback ${CI_PROJECT_NAME} $REVISED_REVISION --namespace ${K8_NAMESPACE}
+    - echo "release rolled back to previous version successfully"
+  when: manual
+  except:
+    - main
+    - release
+    - develop
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+automation-test-suite:
+  image: ${DOCKER_IMAGE_REPO}/docker:latest
+  stage: test
+  script:
+    - echo "Get Test Image from Artifactory"
+    - echo "${ARTIFACTORY_API_KEY}" | docker login -u ${ARTIFACTORY_EMAIL} --password-stdin ${SPECFLOW_REPO}
+    - cp deploy_env.txt deploy-env.txt
+    - export K8_NAMESPACE=$(sed -n '1p' deploy-env.txt)
+    - echo "Build namespace -> ${K8_NAMESPACE}"
+    - |
+      if [[ ${K8_NAMESPACE} == "qa"]]
+      then
+        docker pull ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:develop-latest
+        docker save ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:develop-latest > ${CI_PROJECT_DIR}/docker_image.tar
+        exit 0
+      fi
+    - set +e
+    - |
+      if docker pull ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:feature-${CI_COMMIT_BRANCH}; then
+        docker save ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:feature-${CI_COMMIT_BRANCH} > ${CI_PROJECT_DIR}/docker_image.tar
+        echo "Docker image successfully pulled for progression stage"
+        echo "true" >> progression_test_suite.txt
+      else
+        docker pull ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:develop-latest
+        docker save ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:develop-latest > ${CI_PROJECT_DIR}/docker_image.tar
+        set -e
+        echo "Docker pull failed for progression stage"
+        echo "false" >> progression_test_suite.txt
+        exit 0
+      fi
+  allow_failure: true
+  artifacts:
+    when: always
+    paths:
+      - progression_test_suite.txt
+      - deploy-env.txt
+      - ${CI_PROJECT_DIR}/docker_image.tar
+  except:
+    - main
+    - release
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+test-progression:
+  tags:
+    - senoe-coupa-dev
+  stage: test
+  script:
+    - docker image load < "${CI_PROJECT_DIR}/docker_image.tar"
+    - export PROGRESSION_SUITE=$(sed -n '1p' progression_test_suite.txt)
+    - echo "Progression suite status is => ${PROGRESSION_SUITE}"
+    - |
+      if [[ ${PROGRESSION_SUITE} == "false" ]]
+      then
+        echo "Progression Test Suite is not available for the branch ${CI_COMMIT_BRANCH}"
+        exit 125
+      else
+        export K8_NAMESPACE=$(sed -n '1p' deploy-env.txt)
+        echo "Build namespace -> ${K8_NAMESPACE}"
+        export MARKER=$(echo ${CI_COMMIT_BRANCH} | sed 's/-//g')
+        echo "Marker -> ${MARKER}"
+        docker run --rm --name test_feature_${CI_COMMIT_BRANCH}-${CI_COMMIT_SHORT_SHA} --add-host k8-node-2.dev.chtrse.com:47.43.111.180 ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:feature-${CI_COMMIT_BRANCH} pytest -m ${MARKER} --env ${K8_NAMESPACE}
+      fi
+  needs:
+    - job: automation-test-suite
+      artifacts: true
+  when: on_success
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_MESSAGE =~ /test/i && $CI_COMMIT_TAG != $CI_COMMIT_REF_NAME'
+    when: on_success
+
+
+test-regression:
+  tags:
+    - senoe-coupa-dev
+  stage: test
+  script:
+    - docker image load < "${CI_PROJECT_DIR}/docker_image.tar"
+    - echo "Executing Regression Suite"
+    - export PROGRESSION_SUITE=$(sed -n '1p' progression_test_suite.txt)
+    - echo "Progression suite status is => ${PROGRESSION_SUITE}"
+    - export K8_NAMESPACE=$(sed -n '1p' deploy-env.txt)
+    - echo "Build namespace -> ${K8_NAMESPACE}"
+    - |
+      if [[ ${PROGRESSION_SUITE} == "false" ]]
+      then    
+        docker run --rm --name test_feature_${CI_COMMIT_BRANCH}-${CI_COMMIT_SHORT_SHA} --add-host k8-node-2.dev.chtrse.com:47.43.111.180 ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:develop-latest pytest -m ${PROJECT_NAME}regression --env ${K8_NAMESPACE}
+      else
+        docker run --rm --name test_feature_${CI_COMMIT_BRANCH}-${CI_COMMIT_SHORT_SHA} --add-host k8-node-2.dev.chtrse.com:47.43.111.180 ${DOCKER_IMAGE_REPO}/applicationdevelopment/crosswalk/crosswalk-automation-tests/crosswalk-automation-tests:feature-${CI_COMMIT_BRANCH} pytest -m ${PROJECT_NAME}regression --env ${K8_NAMESPACE}
+      fi
+  when: manual
+  except:
+    - main
+    - release
+    - develop
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+  needs:
+    - job: automation-test-suite
+      artifacts: true
+
+
+
