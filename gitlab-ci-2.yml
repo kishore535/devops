@@ -1,0 +1,233 @@
+include:
+  - template: Security/SAST.gitlab-ci.yml
+
+variables:
+  SPECFLOW_REPO: "docker-artifactory.spectrumflow.net"
+  DOCKER_IMAGE_REPO: "${SPECFLOW_REPO}/docker"
+  IMAGE_NAME: "${DOCKER_IMAGE_REPO}/${CI_PROJECT_PATH}/${CI_PROJECT_NAME}"
+  GIT_STRATEGY: clone
+
+before_script:
+  - PROJECT_NAME=$(echo ${CI_PROJECT_NAME} | sed 's/^costopt-services-\(.*\)-config/\1/')
+  - PROJECT_NAME_UPPERCASE=$(echo ${PROJECT_NAME} | tr '[:lower:]' '[:upper:]')
+
+default:
+  tags:
+    - senoe-coupa-dev 
+
+stages:
+  - scan
+  - deploy
+  - verify
+
+sast:
+  stage: scan
+
+deploy-feature:
+  stage: deploy
+  script:
+    - echo "Deploying - ${CI_PROJECT_NAME}"
+    - echo "PROJECT_NAME -> ${PROJECT_NAME}"
+    - echo "PROJECT_NAME_UPPERCASE -> ${PROJECT_NAME_UPPERCASE}"
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - |
+      if [[ "${CI_COMMIT_MESSAGE}" == *"dev1"* ]]
+      then
+        echo "Deploying to dev1 namespace"
+        export K8_NAMESPACE="dev1"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev2"* ]]
+      then
+        echo "Deploying to dev2 namespace"
+        export K8_NAMESPACE="dev2"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev3"* ]]
+      then
+        echo "Deploying to dev3 namespace"
+        export K8_NAMESPACE="dev3"
+      elif [[ "${CI_COMMIT_MESSAGE}" == *"dev4"* ]]
+      then
+        echo "Deploying to dev4 namespace"
+        export K8_NAMESPACE="dev4"
+      else
+        echo "Pipeline stopped,deployment environment not specified"
+        exit 125
+      fi
+    - echo $K8_NAMESPACE >> deploy_env.txt
+    - export LAST_UPDATED="$(date +%Y-%m-%dT%H:%M:%SZ)"
+    - echo "LAST_UPDATED = ${LAST_UPDATED}"
+    - echo "helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/dev_configs.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set configs.LAST_UPDATED=${LAST_UPDATED} --namespace ${K8_NAMESPACE} --set secrets.HYDRA_API_KEY_TOKEN=${HYDRA_API_KEY_TOKEN}"
+    - helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/dev_configs.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set configs.RELEASE_ID=${CI_COMMIT_SHORT_SHA} --set secrets.DB_PASSWORD=${COSTOPT_DEV_DB_PASSWORD} --set secrets.DB_USERNAME=${COSTOPT_DEV_DB_USER} --set secrets.DB_NAME=${COSTPOPT_DEV_DB_NAME} --set secrets.DB_HOST=${COSTOPT_DEV_DB_HOST} --set secrets.HYDRA_API_KEY=${HYDRA_API_KEY} --set secrets.COSTOPT_API_KEY=${COSTOPT_API_KEY} --set configs.LAST_UPDATED=${LAST_UPDATED} --set-string secrets.SECRETS_LAST_UPDATED=${LAST_UPDATED} --set secrets.DATA_LAKE_API_USERNAME=${DATA_LAKE_API_USERNAME} --set secrets.DATA_LAKE_API_PASSWORD=${DATA_LAKE_API_PASSWORD} --set secrets.CONFIG_GEN_USERNAME=${CONFIG_GEN_USERNAME} --set mount_secrets.SSL_CRT=${SSL_CERT} --namespace ${K8_NAMESPACE}
+    - echo "Config Deployment Success !"
+  artifacts:
+    paths:
+      - deploy_env.txt
+  except:
+    - main
+    - release
+    - develop
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+deploy-qa:
+  stage: deploy
+  script:
+    - echo "Deploying - ${CI_PROJECT_NAME}"
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - echo "Deploying to qa namespace"
+    - export K8_NAMESPACE="qa"
+    - echo $K8_NAMESPACE >> deploy_env.txt
+    - export LAST_UPDATED="$(date +%Y-%m-%dT%H:%M:%SZ)"
+    - echo "LAST_UPDATED = ${LAST_UPDATED}"
+    - echo "helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/qa_configs.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set secrets.SEARCH_SITE_API_KEY_TOKEN=${SEARCH_SITE_API_KEY_TOKEN} --set configs.LAST_UPDATED=${LAST_UPDATED} --namespace ${K8_NAMESPACE}"
+    - helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/qa_configs.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set configs.LAST_UPDATED=${LAST_UPDATED} --set configs.RELEASE_ID=${CI_COMMIT_SHORT_SHA} --set secrets.DB_PASSWORD=${COSTOPT_QA_DB_PASSWORD} --set secrets.DB_USERNAME=${COSTOPT_QA_DB_USER} --set secrets.DB_NAME=${COSTPOPT_QA_DB_NAME} --set secrets.DB_HOST=${COSTOPT_QA_DB_HOST} --set secrets.DATA_LAKE_API_USERNAME=${DATA_LAKE_API_USERNAME} --set secrets.DATA_LAKE_API_PASSWORD=${DATA_LAKE_API_PASSWORD} --set secrets.HYDRA_API_KEY=${HYDRA_API_KEY} --set secrets.COSTOPT_API_KEY=${COSTOPT_API_KEY} --set-string secrets.SECRETS_LAST_UPDATED=${LAST_UPDATED} --set mount_secrets.SSL_CRT=${SSL_CERT} --namespace ${K8_NAMESPACE}
+    - echo "Config Deployment Success !"
+  artifacts:
+    paths:
+      - deploy_env.txt
+  only:
+    - develop
+
+deploy-prod:
+  stage: deploy
+  script:
+    - echo "Deploying - ${CI_PROJECT_NAME}"
+    - |
+      if [[ $CI_COMMIT_TAG =~ ^${PROJECT_NAME_UPPERCASE}_[0-9]+\.[0-9]+\.[0-9]+$ ]]
+      then
+        echo "CI_COMMIT_TAG -> ${CI_COMMIT_TAG}"
+      else
+        echo "Pipeline stopped, invalid CI_COMMIT_TAG given as ${CI_COMMIT_TAG}"
+        exit 125
+      fi
+    - echo "CI_COMMIT_MESSAGE -> ${CI_COMMIT_MESSAGE}"
+    - echo "Deploying to prod namespace"
+    - export K8_NAMESPACE="prod"
+    - export LAST_UPDATED="$(date +%Y-%m-%dT%H:%M:%SZ)"
+    - echo "LAST_UPDATED = ${LAST_UPDATED}"
+    - echo "helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/prod_configs.yaml  --set configs.ENVIRONMENT=${K8_NAMESPACE} configs.ENVIRONMENT=${K8_NAMESPACE} --set configs.LAST_UPDATED=${CI_COMMIT_TAG}} --namespace ${K8_NAMESPACE}"
+    - helm upgrade --install ${CI_PROJECT_NAME} helm/ -f configs/prod_configs.yaml --set configs.ENVIRONMENT=${K8_NAMESPACE} --set configs.LAST_UPDATED=${LAST_UPDATED} --set configs.RELEASE_ID=${CI_COMMIT_SHORT_SHA} --set secrets.DB_PASSWORD=${COSTOPT_PROD_DB_PASSWORD} --set secrets.DB_USERNAME=${COSTOPT_PROD_DB_USER} --set secrets.DB_NAME=${COSTOPT_PROD_DB_NAME} --set secrets.DB_HOST=${COSTOPT_PROD_DB_HOST}  --set secrets.DATA_LAKE_API_USERNAME=${DATA_LAKE_API_USERNAME} --set secrets.DATA_LAKE_API_PASSWORD=${DATA_LAKE_API_PASSWORD} --set secrets.HYDRA_API_KEY=${HYDRA_API_KEY} --set secrets.COSTOPT_API_KEY=${COSTOPT_API_KEY} --set mount_secrets.SSL_CRT=${SSL_CERT} --set configs.CONFIG_VERSION=${CI_COMMIT_TAG} --set-string secrets.SECRETS_LAST_UPDATED=${LAST_UPDATED} --namespace ${K8_NAMESPACE}
+    - echo "Config Deployment Success !"
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_TAG'
+  tags:
+    - costopt
+
+verify-job:
+  stage: verify
+  script:
+    - echo "Verifying Deployment for - ${CI_PROJECT_NAME}"
+    - echo "PROJECT_NAME -> ${PROJECT_NAME}"
+    - echo "PROJECT_NAME_UPPERCASE -> ${PROJECT_NAME_UPPERCASE}"
+    - export K8_NAMESPACE=$(sed -n '1p' deploy_env.txt)
+    - configmap_name=$(echo "costopt-services-${PROJECT_NAME}-configs")
+    - echo "configmap_name -> ${configmap_name}"
+    - secrets_name=$(echo "costopt-services-${PROJECT_NAME}-secrets")
+    - echo "secrets_name -> ${secrets_name}"
+    - echo "configmap_val=$(kubectl -n "${K8_NAMESPACE}" get configMaps | grep ${configmap_name})"
+    - configmap_val=$(kubectl -n "${K8_NAMESPACE}" get configMaps | grep ${configmap_name})
+    - |
+      if [[ -n "$configmap_val" ]]
+      then
+        echo "The configMap was found as $configmap_val"
+      else
+        echo "The configMap was not found."
+        exit 125
+      fi
+    - echo "configmap_last_updated=$(kubectl -n "${K8_NAMESPACE}" get configmap "${configmap_name}" -o=jsonpath='{.data.LAST_UPDATED}')"
+    - configmap_last_updated=$(kubectl -n "${K8_NAMESPACE}" get configmap "${configmap_name}" -o=jsonpath='{.data.LAST_UPDATED}')
+    - current_time=$(date +%s)
+    - configmap_datetime_unix=$(date -d "$configmap_last_updated" +%s)
+    - echo "current_time is $current_time"
+    - echo "configmap_datetime_unix is $configmap_datetime_unix"
+    - |
+      if [ $(expr $current_time - $configmap_datetime_unix) -gt 120 ]; then
+        echo "The CONFIGMAP DATETIME value is more than 2 minutes ago."
+        exit 125
+      else
+        echo "The CONFIGMAP DATETIME value is less than or equal to 2 minutes ago."
+      fi
+    - echo "secrets_val=$(kubectl -n "${K8_NAMESPACE}" get secrets | grep ${secrets_name})"
+    - secrets_val=$(kubectl -n "${K8_NAMESPACE}" get secrets | grep ${secrets_name})
+    - |
+      if [[ -n "$secrets_val" ]]
+      then
+        echo "The secrets was found as $secrets_val"
+      else
+        echo "The secrets was not found."
+        exit 125
+      fi
+    - secrets_last_updated=$(kubectl -n "${K8_NAMESPACE}" get secrets "${secrets_name}" -o=jsonpath='{.data.SECRETS_LAST_UPDATED}' | base64 --decode | tr -d '\n')
+    - secrets_datetime_unix=$(date -d "$secrets_last_updated" +%s)
+    - echo "secrets_datetime_unix is $secrets_datetime_unix"
+    - |
+      if [ $(expr $current_time - $secrets_datetime_unix) -gt 120 ]; then
+        echo "The SECRETS DATETIME value is more than 2 minutes ago."
+        exit 125
+      else
+        echo "The SECRETS DATETIME value is less than or equal to 2 minutes ago."
+      fi
+    - echo "Verify Stage is completed!!!!"
+  except:
+    - main
+    - /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/
+
+verify-job-prod:
+  stage: verify
+  script:
+    - echo "Verifying Deployment for - ${CI_PROJECT_NAME}"
+    - export K8_NAMESPACE='prod'
+    - configmap_name=$(echo "costopt-services-${PROJECT_NAME}-configs")
+    - secrets_name=$(echo "costopt-services-${PROJECT_NAME}-secrets")
+    - echo "configmap_val=$(kubectl -n "${K8_NAMESPACE}" get configMaps | grep ${configmap_name})"
+    - configmap_val=$(kubectl -n "${K8_NAMESPACE}" get configMaps | grep ${configmap_name})
+    - |
+      if [[ -n "$configmap_val" ]]
+      then
+        echo "The configMap was found as $configmap_val"
+      else
+        echo "The configMap was not found."
+        exit 125
+      fi
+    - echo "configmap_last_updated=$(kubectl -n "${K8_NAMESPACE}" get configmap "${configmap_name}" -o=jsonpath='{.data.LAST_UPDATED}')"
+    - configmap_last_updated=$(kubectl -n "${K8_NAMESPACE}" get configmap "${configmap_name}" -o=jsonpath='{.data.LAST_UPDATED}')
+    - current_time=$(date +%s)
+    - configmap_datetime_unix=$(date -d "$configmap_last_updated" +%s)
+    - echo "current_time is $current_time"
+    - echo "configmap_datetime_unix is $configmap_datetime_unix"
+    - kubectl get namespaces
+    - |
+      if [ $(expr $current_time - $configmap_datetime_unix) -gt 120 ]; then
+        echo "The CONFIGMAP DATETIME value is more than 2 minutes ago."
+        exit 125
+      else
+        echo "The CONFIGMAP DATETIME value is less than or equal to 2 minutes ago."
+      fi
+    - echo "secrets_val=$(kubectl -n "${K8_NAMESPACE}" get secrets | grep ${secrets_name})"
+    - secrets_val=$(kubectl -n "${K8_NAMESPACE}" get secrets | grep ${secrets_name})
+    - |
+      if [[ -n "$secrets_val" ]]
+      then
+        echo "The secrets was found as $secrets_val"
+      else
+        echo "The secrets was not found."
+        exit 125
+      fi
+    - secrets_last_updated=$(kubectl -n "${K8_NAMESPACE}" get secrets "${secrets_name}" -o=jsonpath='{.data.SECRETS_LAST_UPDATED}' | base64 --decode | tr -d '\n')
+    - secrets_datetime_unix=$(date -d "$secrets_last_updated" +%s)
+    - echo "secrets_datetime_unix is $secrets_datetime_unix"
+    - |
+      if [ $(expr $current_time - $secrets_datetime_unix) -gt 120 ]; then
+        echo "The SECRETS DATETIME value is more than 2 minutes ago."
+        exit 125
+      else
+        echo "The SECRETS DATETIME value is less than or equal to 2 minutes ago."
+      fi
+    - echo "Verify Stage is completed!!!!"
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^[A-Z]+_[0-9]+\.[0-9]+\.[0-9]+$/ && $CI_COMMIT_TAG'
+  needs:
+    - ["deploy-prod"]
+  tags:
+    - costopt
+
+    
+
